@@ -7,7 +7,7 @@ seaborn == 0.13.2
 pillow == 10.3.0
 # library for analysis
 numpy == 1.26.4
-plotly-express == 0.4.1
-scikit-learn == 1.5.0
+#plotly-express == 0.4.1
+#scikit-learn == 1.5.0
 #Xlswriter == 3.2.0
 #fpdf == 1.7.2
