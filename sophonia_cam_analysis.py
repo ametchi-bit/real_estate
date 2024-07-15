@@ -38,7 +38,7 @@ SIDEBAR_LOGO = "images/LogoDATARIUM.png"  # or any other path you prefer
 MAIN_BODY_LOGO = "images/LogoDATARIUM_pill.png"  # or any other path you prefer
 
 # Use st.logo() for the main body (branding)
-st.logo(SIDEBAR_LOGO, icon_image=MAIN_BODY_LOGO)
+# st.logo(SIDEBAR_LOGO, icon_image=MAIN_BODY_LOGO)
 
 # title
 st.markdown(
