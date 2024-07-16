@@ -17,10 +17,12 @@ import plotly.io as pio
 import tempfile
 from docx2pdf import convert
 from io import BytesIO
+import plotly.graph_objects as go
 import io
 import pythoncom
 import win32com.client
-from util import summary_desc_symphonia, explain_summary_desc, symphonia_data
+import uuid
+from util import (summary_desc_symphonia, explain_summary_desc, symphonia_data, repartition_viz, plot_comparaison_type_objet_real_estate, plot_weekly_daily_patterns_real_estate)
 
 
 def export_to_docx_pdf(
@@ -44,6 +46,7 @@ def export_to_docx_pdf(
     desc_stat_title,
     desc_stat_content,
     # data_distribution,
+    data_viz,
     conclusion_title,
     conclusion_subtitl_r,
     resume_content,
@@ -124,12 +127,14 @@ def export_to_docx_pdf(
     section.bottom_margin = Pt(36)
     section.left_margin = Pt(36)
     section.right_margin = Pt(36)
+    
 
     # page title
     page_title = doc.add_heading(0)
     page_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     page_title_run = page_title.add_run(title)
     page_title_run.bold = True
+    doc.add_page_break()
 
     # page subtitle
     page_subtitle = doc.add_heading(level=1)
@@ -139,43 +144,43 @@ def export_to_docx_pdf(
 
     # Introduction title
     introduction_title = doc.add_heading(level=1)
-    introduction_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    introduction_title.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     introduction_title_run = introduction_title.add_run(intro_title)
     introduction_title_run.bold = True
 
     # Objectif title
     objectif_title = doc.add_heading(level=2)
-    objectif_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    objectif_title.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     objectif_title_run = objectif_title.add_run(title_objectif)
     objectif_title_run.bold = True
 
     # Objectif text
     objectif_text = doc.add_paragraph()
-    objectif_text.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    objectif_text.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
     objectif_text_run = objectif_text.add_run(intro_objectif)
     objectif_text_run.font.size = Pt(14)
 
     # Scope title
     scope_title = doc.add_heading(level=2)
-    scope_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    scope_title.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     scope_title_run = scope_title.add_run(title_scope)
     scope_title_run.bold = True
 
     # Scope text
     scope_text = doc.add_paragraph()
-    scope_text.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    scope_text.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
     scope_text_run = scope_text.add_run(text_scope)
-    scope_text_run.bold = True
+    scope_text_run.font.size = Pt(14)
 
     # Description title
     description_title = doc.add_heading(level=2)
-    description_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    description_title.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     description_title_run = description_title.add_run(title_data_desc)
     description_title_run.bold = True
 
     # Description subtitle
     description_subtitle = doc.add_heading(level=3)
-    description_subtitle.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    description_subtitle.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     description_subtitle_run = description_subtitle.add_run(sub_title_data_text)
     description_subtitle_run.bold = True
 
@@ -320,6 +325,7 @@ def export_to_docx_pdf(
                 cell.paragraphs[0].paragraph_format.alignment = (
                     WD_PARAGRAPH_ALIGNMENT.CENTER
                 )
+    doc.add_paragraph()
     # Add explanation_sum_desc
 
     explanation_sum_desc = doc.add_paragraph()
@@ -345,8 +351,44 @@ def export_to_docx_pdf(
         distribution_fig, image_stream, format="png", width=955, height=525, scale=2
     )
     image_stream.seek(0)
-    doc.add_picture(image_stream, width=Inches(8), height=Inches(8))
+    doc.add_picture(image_stream, width=Inches(6.31), height=Inches(4.19))
+    
+    doc.add_page_break()
 
+    # Data visualization
+    rep_cam_fig, rep_scen_fig, fig_categorie,image_stream_cam,image_stream_cat, image_stream_scen = repartition_viz(symphonia_data)
+
+    data_visualization = doc.add_heading(level=2)
+    data_visualization.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+    data_visualization_run = data_visualization.add_run(data_viz)
+    data_visualization_run.bold = True
+    
+    # Data visualization  repartion
+    #camera
+    doc.add_picture(image_stream_cam, width=Inches(7.62), height=Inches(4.50))
+    
+    doc.add_page_break()
+    
+    #scenario
+    doc.add_picture(image_stream_scen, width=Inches(7.62), height=Inches(4.50))
+    
+    doc.add_page_break()
+    
+    # categorie
+    doc.add_picture(image_stream_cat, width=Inches(7.62), height=Inches(4.50))
+    
+    doc.add_page_break()
+    
+    # comparaison  des type d'objet
+    comparaison_fig, image_stream_comparaison = plot_comparaison_type_objet_real_estate(symphonia_data)
+    doc.add_picture(image_stream_comparaison, width=Inches(7.62), height=Inches(4.50))
+    
+    doc.add_page_break()
+    
+    # Trends 
+    mwd_fig, image_stream_mwd = plot_weekly_daily_patterns_real_estate(symphonia_data, "Horodatage", "Nombre")
+    doc.add_picture(image_stream_mwd, width=Inches(7.62), height=Inches(4.50))
+    
     # Conclusion
     conclusion_main_title = doc.add_heading(level=2)
     conclusion_main_title.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
@@ -379,10 +421,11 @@ def export_to_docx_pdf(
 
     # Auto-save function using raport title and timestamp
     timestamp = datetime.now().strftime("%d-%m-%Y %H-%M-%S")
+    unique_id = str(uuid.uuid4())[:8]
     auto_save_filename = f"{title}-{timestamp}.docx"
-    pdf_filename = f"{title}-{timestamp}.pdf"
+    pdf_filename = f"{title}-{timestamp}-{unique_id}.pdf"
 
-    # Save the document
+    # Save the document as DOCX
     doc.save(auto_save_filename)
 
     def convert_docx_to_pdf(docx_file, pdf_file):
@@ -392,17 +435,17 @@ def export_to_docx_pdf(
         finally:
             pythoncom.CoUninitialize()
 
-    # Convert the DOCX to PDF
+     # Convert the DOCX to PDF
     convert_docx_to_pdf(auto_save_filename, pdf_filename)
 
-    # return doc as buffer
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
+    # Read the PDF file and return its content
+    with open(pdf_filename, "rb") as pdf_file:
+        pdf_content = pdf_file.read()
+
+    return pdf_content
 
 
-def generate_report(
+def generate_report_cam(
     title,
     subtitle,
     intro_title,
@@ -423,12 +466,14 @@ def generate_report(
     desc_stat_title,
     desc_stat_content,
     # data_distribution,
+    data_viz,
     conclusion_title,
     conclusion_subtitl_r,
     resume_content,
     recomm_title,
     recomm_content,
 ):
+    
     pdf_data = export_to_docx_pdf(
         title,
         subtitle,
@@ -450,6 +495,7 @@ def generate_report(
         desc_stat_title,
         desc_stat_content,
         # data_distribution,
+        data_viz,
         conclusion_title,
         conclusion_subtitl_r,
         resume_content,

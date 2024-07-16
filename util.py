@@ -10,6 +10,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from streamlit_modal import Modal
+import plotly.io as pio
+from io import BytesIO
 
 
 def scenario_types(selected_df):
@@ -146,9 +148,14 @@ def comparaison_type_objet_real_estate(symphonia_data):
 
 
 def plot_comparaison_type_objet_real_estate(symphonia_data):
-    vehicule_comparison = comparaison_type_objet_real_estate(symphonia_data)
+    symphonia_data_filtered = handle_missing_val_real_estate(symphonia_data)
+    vehicule_comparison = (
+        symphonia_data_filtered.groupby(["Type d'objet", "Scénario"])["Nombre"]
+        .sum()
+        .reset_index()
+    )
 
-    fig = px.bar(
+    comparaison_fig = px.bar(
         vehicule_comparison,
         x="Scénario",
         y="Nombre",
@@ -161,40 +168,110 @@ def plot_comparaison_type_objet_real_estate(symphonia_data):
             "Type d'objet": "Type d'objet",
         },
     )
+    image_stream_comparaison = BytesIO()
+    pio.write_image(comparaison_fig, image_stream_comparaison, format="png", width=955, height=525, scale=2)
+    image_stream_comparaison.seek(0)
+    return comparaison_fig, image_stream_comparaison
 
-    st.plotly_chart(fig)
 
-
-def calculate_monthly_weekly_daily_patterns_real_estate(
-    symphonia_data, date_column, value_column
-):
-    # Convert Horodatage to datetime and extract the month
-    symphonia_data["Horodatage"] = pd.to_datetime(
-        symphonia_data["Horodatage"], format="%d/%m/%Y %H:%M:%S"
+def repartition_viz(symphonia_data):
+    # Group and aggregate the data
+    grouped_data = (
+        symphonia_data.groupby(["Caméra", "Scénario", "Catégorie", "Type d'objet"])
+        .agg({"Nombre": "sum"})
+        .reset_index()
     )
-    symphonia_data["Month"] = symphonia_data["Horodatage"].dt.strftime("%Y-%m")
 
-    symphonia_data[date_column] = pd.to_datetime(symphonia_data[date_column])
+    # Extract relevant statistics for interpretation
+
+    camera_counts = grouped_data.groupby("Caméra")["Nombre"].sum()
+    scenario_counts = grouped_data.groupby("Scénario")["Nombre"].sum()
+    category_counts = grouped_data.groupby("Catégorie")["Nombre"].sum()
+
+    camera_data_list = []
+    for camera, count in camera_counts.items():
+        # st.markdown(f"- **{camera}**: {count} événements")
+        camera_data_list.append({"Caméra": camera, "événements": count})
+    rep_cam = pd.DataFrame(camera_data_list)
+
+    # Creating the pie chart
+    rep_cam_fig = px.pie(
+        rep_cam,
+        values="événements",
+        names="Caméra",
+        color_discrete_sequence=px.colors.sequential.RdBu,
+        width=600,  # Set the width of the plot
+        height=600,
+    )
+    image_stream_cam = BytesIO()
+    pio.write_image(rep_cam_fig, image_stream_cam, format="png", width=955, height=525, scale=2)
+    image_stream_cam.seek(0)
+    
+
+    scenario_data_list = []
+    for scenario, count in scenario_counts.items():
+        # st.markdown(f"- **{scenario}**: {count} événements")
+        scenario_data_list.append({"Scénario": scenario, "événements": count})
+    rep_scen = pd.DataFrame(scenario_data_list)
+
+    # Creating the pie chart
+    rep_scen_fig = px.pie(
+        rep_scen,
+        values="événements",
+        names="Scénario",
+        color_discrete_sequence=px.colors.sequential.RdBu,
+        width=600,  # Set the width of the plot
+        height=600,
+    )
+    image_stream_scen = BytesIO()
+    pio.write_image(rep_scen_fig, image_stream_scen, format="png", width=955, height=525, scale=2)
+    image_stream_scen.seek(0)
+
+    categorie_data_list = []
+    for category, count in category_counts.items():
+        # st.markdown(f"- **{category}**: {count} événements")
+        categorie_data_list.append({"Catégorie": category, "événements": count})
+    rep_cat = pd.DataFrame(categorie_data_list)
+
+    # Creating the pie chart
+    fig_categorie = px.pie(
+        rep_cat,
+        values="événements",
+        names="Catégorie",
+        color_discrete_sequence=px.colors.sequential.RdBu,
+        width=600,  # Set the width of the plot
+        height=600,
+    )
+    image_stream_cat = BytesIO()
+    pio.write_image(fig_categorie, image_stream_cat, format="png", width=955, height=525, scale=2)
+    image_stream_cat.seek(0)
+    return rep_cam_fig, rep_scen_fig, fig_categorie, image_stream_cam, image_stream_cat, image_stream_scen
+
+def calculate_monthly_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_column):
+    # Convert Horodatage to datetime and extract the month
+    symphonia_data[date_column] = pd.to_datetime(symphonia_data[date_column], format="%d/%m/%Y %H:%M:%S")
+    symphonia_data["Month"] = symphonia_data[date_column].dt.strftime("%Y-%m")
+
     monthly_pattern = symphonia_data.resample("M", on=date_column)[value_column].sum()
     weekly_pattern = symphonia_data.resample("W", on=date_column)[value_column].sum()
     daily_pattern = symphonia_data.resample("D", on=date_column)[value_column].sum()
+
     return monthly_pattern, weekly_pattern, daily_pattern
 
 
 def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_column):
-    monthly_pattern, weekly_pattern, daily_pattern = (
-        calculate_monthly_weekly_daily_patterns_real_estate(
-            symphonia_data, date_column, value_column
-        )
+    
+    monthly_pattern, weekly_pattern, daily_pattern = calculate_monthly_weekly_daily_patterns_real_estate(
+        symphonia_data, date_column, value_column
     )
 
-    fig = make_subplots(
+    mwd_fig = make_subplots(
         rows=3,
         cols=1,
-        subplot_titles=("Modèle  Mensuel", "Modèle Hebdomadaire", "Modèle quotidien"),
+        subplot_titles=("Modèle Mensuel", "Modèle Hebdomadaire", "Modèle quotidien"),
     )
 
-    fig.add_trace(
+    mwd_fig.add_trace(
         go.Scatter(
             x=monthly_pattern.index, y=monthly_pattern, mode="lines", name="Mois"
         ),
@@ -202,7 +279,7 @@ def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_co
         col=1,
     )
 
-    fig.add_trace(
+    mwd_fig.add_trace(
         go.Scatter(
             x=weekly_pattern.index, y=weekly_pattern, mode="lines", name="Semaine"
         ),
@@ -210,22 +287,37 @@ def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_co
         col=1,
     )
 
-    fig.add_trace(
+    mwd_fig.add_trace(
         go.Scatter(x=daily_pattern.index, y=daily_pattern, mode="lines", name="Jour"),
         row=3,
         col=1,
     )
 
-    fig.update_layout(
+    mwd_fig.update_layout(
         title_text="Modèle Mensuel, Hebdomadaire, et quotidien",
         height=800,
         showlegend=True,
     )
-
-    st.plotly_chart(fig)
-
-
+    image_stream_mwd = BytesIO()
+    pio.write_image(mwd_fig, image_stream_mwd, format="png", width=955, height=525, scale=2)
+    image_stream_mwd.seek(0)
+    
+    return mwd_fig, image_stream_mwd
+    
 # end of it
+def count_by_type_objet(selected_df):
+    # Filter to ensure only relevant types of objects are considered
+    relevant_objects = ["bus", "moto", "personne", "véhicule intermédiaire", "véhicule léger", "vélo"]
+    filtered_data = selected_df[selected_df["Type d'objet"].isin(relevant_objects)]
+    
+     # Sum the 'Nombre' for each type of object
+    total_counts = filtered_data.groupby("Type d'objet")["Nombre"].sum()
+
+     # Assign total counts to variables
+    counts = {obj: total_counts.get(obj, 0) for obj in relevant_objects}
+
+    return counts
+
 def generate_summary_statistics(selected_df):
     return selected_df.describe().T
 
@@ -288,7 +380,7 @@ def detect_anomalies(selected_df, column, threshold):
 
 def calculate_monthly_weekly_daily_patterns(selected_df, date_column, value_column):
     selected_df[date_column] = pd.to_datetime(selected_df[date_column])
-    monthly_pattern = selected_df.resample("ME", on=date_column)[value_column].sum()
+    monthly_pattern = selected_df.resample("M", on=date_column)[value_column].sum()
     weekly_pattern = selected_df.resample("W", on=date_column)[value_column].sum()
     daily_pattern = selected_df.resample("D", on=date_column)[value_column].sum()
     return monthly_pattern, weekly_pattern, daily_pattern

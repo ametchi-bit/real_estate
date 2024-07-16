@@ -1,5 +1,6 @@
 import streamlit as st
-from generate_report3 import generate_report
+from generate_report_global import generate_report
+from generate_report_perCam import generate_report_cam
 import os
 import pandas as pd
 from io import BytesIO
@@ -8,6 +9,9 @@ import plotly.graph_objects as go
 from plotly.offline import plot
 import plotly.io as pio
 from plotly.subplots import make_subplots
+import uuid
+from datetime import datetime
+from io import BytesIO
 from util import (
     symphonia_data,
     visualization_pie_repartition,
@@ -20,6 +24,8 @@ from util import (
     plot_comparaison_type_objet_real_estate,
     calculate_monthly_weekly_daily_patterns_real_estate,
     plot_weekly_daily_patterns_real_estate,
+    repartition_viz,
+    count_by_type_objet
 )
 
 
@@ -52,6 +58,7 @@ def handle_missing_val_real_estate(data):
     return filtered_data
 
 
+
 # Page title
 st.markdown(
     '<div class="custom-container">'
@@ -64,6 +71,8 @@ st.divider()
 
 # Define function to generate the global report
 def rapport_global(symphonia_data):
+     # Generate figures for visualizations
+    
     st.subheader("Titre du rapport")
     report_title = st.text_input(
         "Entrez le titre du rapport", "Rapport Global des Données de Surveillance"
@@ -150,171 +159,41 @@ def rapport_global(symphonia_data):
             title="Distribution des données",
         )
         st.plotly_chart(distribution_fig)
-    # image_stream = BytesIO()
-    # pio.write_image(distribution_fig, format="png", width=955, height=525, scale=2)
-    # image_stream.seek(0)
 
     # Data Visualizations
     st.subheader("Visualisation des donnees")
-    # Group and aggregate the data
-    grouped_data = (
-        symphonia_data.groupby(["Caméra", "Scénario", "Catégorie", "Type d'objet"])
-        .agg({"Nombre": "sum"})
-        .reset_index()
-    )
-
-    # Extract relevant statistics for interpretation
-
-    camera_counts = grouped_data.groupby("Caméra")["Nombre"].sum()
-    scenario_counts = grouped_data.groupby("Scénario")["Nombre"].sum()
-    category_counts = grouped_data.groupby("Catégorie")["Nombre"].sum()
+    rep_cam_fig, rep_scen_fig, fig_categorie,image_stream_cam,image_stream_cat, image_stream_scen = repartition_viz(symphonia_data)
 
     st.markdown(
         "### Répartition des donnees en fonction des cameras, Scenario et categorie "
     )
-
     st.markdown(
         '<h3 style="text-align: center;">Caméra</h3>',
         unsafe_allow_html=True,
     )
-    camera_data_list = []
-    for camera, count in camera_counts.items():
-        # st.markdown(f"- **{camera}**: {count} événements")
-        camera_data_list.append({"Caméra": camera, "événements": count})
-    rep_cam = pd.DataFrame(camera_data_list)
-
-    # Creating the pie chart
-    rep_cam_fig = px.pie(
-        rep_cam,
-        values="événements",
-        names="Caméra",
-        color_discrete_sequence=px.colors.sequential.RdBu,
-        width=600,  # Set the width of the plot
-        height=600,
-    )
     st.plotly_chart(rep_cam_fig)
-
     st.markdown(
         '<h3 style="text-align: center;">Scénario</h3>',
         unsafe_allow_html=True,
     )
-    scenario_data_list = []
-    for scenario, count in scenario_counts.items():
-        # st.markdown(f"- **{scenario}**: {count} événements")
-        scenario_data_list.append({"Scénario": scenario, "événements": count})
-    rep_scen = pd.DataFrame(scenario_data_list)
-
-    # Creating the pie chart
-    rep_scen_fig = px.pie(
-        rep_scen,
-        values="événements",
-        names="Scénario",
-        color_discrete_sequence=px.colors.sequential.RdBu,
-        width=600,  # Set the width of the plot
-        height=600,
-    )
     st.plotly_chart(rep_scen_fig)
-
     st.markdown(
         '<h3 style="text-align: center;">Catégorie</h3>',
         unsafe_allow_html=True,
     )
-    categorie_data_list = []
-    for category, count in category_counts.items():
-        # st.markdown(f"- **{category}**: {count} événements")
-        categorie_data_list.append({"Catégorie": category, "événements": count})
-    rep_cat = pd.DataFrame(categorie_data_list)
-
-    # Creating the pie chart
-    fig = px.pie(
-        rep_cat,
-        values="événements",
-        names="Catégorie",
-        color_discrete_sequence=px.colors.sequential.RdBu,
-        width=600,  # Set the width of the plot
-        height=600,
-    )
-    st.plotly_chart(fig)
+    st.plotly_chart(fig_categorie)
+    
+    # comparaison des donnees 
     st.markdown(
         '<h4 style="text-align: left; color: #000000;">comparaison des donnees</h4>',
         unsafe_allow_html=True,
     )
-    symphonia_data_filtered = handle_missing_val_real_estate(symphonia_data)
-    vehicule_comparison = (
-        symphonia_data_filtered.groupby(["Type d'objet", "Scénario"])["Nombre"]
-        .sum()
-        .reset_index()
-    )
-
-    comparaison_fig = px.bar(
-        vehicule_comparison,
-        x="Scénario",
-        y="Nombre",
-        color="Type d'objet",
-        barmode="group",
-        title="Comparaison par type d'objet et scénario",
-        labels={
-            "Nombre": "Nombre",
-            "Scénario": "Scénario",
-            "Type d'objet": "Type d'objet",
-        },
-    )
-
+    comparaison_fig, image_stream_comparaison = plot_comparaison_type_objet_real_estate(symphonia_data)
     st.plotly_chart(comparaison_fig)
 
     # Trends and patterns
     st.subheader("Tendance et modele")
-    # convert to proper datetime
-    symphonia_data["Horodatage"] = pd.to_datetime(
-        symphonia_data["Horodatage"], format="%d/%m/%Y %H:%M:%S"
-    )
-    symphonia_data["Month"] = symphonia_data["Horodatage"].dt.strftime("%Y-%m")
-
-    symphonia_data["Horodatage"] = pd.to_datetime(symphonia_data["Horodatage"])
-    monthly_pattern = symphonia_data.resample("ME", on="Horodatage")["Nombre"].sum()
-    weekly_pattern = symphonia_data.resample("W", on="Horodatage")["Nombre"].sum()
-    daily_pattern = symphonia_data.resample("D", on="Horodatage")["Nombre"].sum()
-
-    monthly_pattern, weekly_pattern, daily_pattern = (
-        calculate_monthly_weekly_daily_patterns_real_estate(
-            symphonia_data, "Horodatage", "Nombre"
-        )
-    )
-
-    mwd_fig = make_subplots(
-        rows=3,
-        cols=1,
-        subplot_titles=("Modèle  Mensuel", "Modèle Hebdomadaire", "Modèle quotidien"),
-    )
-
-    mwd_fig.add_trace(
-        go.Scatter(
-            x=monthly_pattern.index, y=monthly_pattern, mode="lines", name="Mois"
-        ),
-        row=1,
-        col=1,
-    )
-
-    mwd_fig.add_trace(
-        go.Scatter(
-            x=weekly_pattern.index, y=weekly_pattern, mode="lines", name="Semaine"
-        ),
-        row=2,
-        col=1,
-    )
-
-    mwd_fig.add_trace(
-        go.Scatter(x=daily_pattern.index, y=daily_pattern, mode="lines", name="Jour"),
-        row=3,
-        col=1,
-    )
-
-    mwd_fig.update_layout(
-        title_text="Modèle Mensuel, Hebdomadaire, et quotidien",
-        height=800,
-        showlegend=True,
-    )
-
+    mwd_fig, image_stream_mwd = plot_weekly_daily_patterns_real_estate(symphonia_data, "Horodatage", "Nombre")
     st.plotly_chart(mwd_fig)
 
     # Anomalies and Insight
@@ -323,7 +202,7 @@ def rapport_global(symphonia_data):
 
     # Conclusion
     st.subheader("Conclusion")
-    resume_subtitle = st.write("Resune")
+    st.write("Resune")
     conclusion_text = st.text_area("Entrer ou Modifier le text", "")
     st.markdown(
         '<h5 style="text-align: left; color: #000000;">Recommendation</h5>',
@@ -355,7 +234,7 @@ def rapport_global(symphonia_data):
             transformation_data_content=report_data_transform,
             desc_stat_title="Statistiques Récapitulatives",
             desc_stat_content=report_desc_info,
-            # image_stream_fig_dis=image_stream,
+            data_viz = "Visualisation des donnees",
             conclusion_title="Conclusion",
             conclusion_subtitl_r="Resume",
             resume_content=conclusion_text,
@@ -366,7 +245,7 @@ def rapport_global(symphonia_data):
             st.download_button(
                 label="Télécharger le fichier PDF",
                 data=pdf_data,
-                file_name="rapport.pdf",
+                #file_name="rdp.pdf",
                 mime="application/pdf",
             )
         else:
@@ -376,9 +255,11 @@ def rapport_global(symphonia_data):
 
 # Define function to generate the camera-specific report
 def rapport_par_camera(selected_df):
+    # Generate figures for visualizations
+    
     st.subheader("Titre du rapport")
     report_title = st.text_input(
-        "Entrez le titre du rapport", "Rapport Global des Données de Surveillance"
+        "Entrez le titre du rapport", f"Rapport des donnée de surveillance de la caméra:"
     )
     st.subheader("Introduction")
     st.markdown(
@@ -387,7 +268,7 @@ def rapport_par_camera(selected_df):
     )
     report_objectif = st.text_area(
         "Entrez ou modifier l'objectif",
-        "Ce rapport vise à analyser les données de circulation captées par les caméras de vidéosurveillance installées à l'entrée principale de la propriété immobilière.",
+        "Ce rapport vise à analyser les données de circulation captées par la caméra de vidéosurveillance installées à l'entrée principale de la propriété immobilière.",
     )
 
     st.markdown(
@@ -402,7 +283,7 @@ def rapport_par_camera(selected_df):
     # Data description
     st.subheader("Description des donnees")
     st.markdown(
-        '<h4 style="text-align: left; color: #000000;">Appercue de l\'ensemble des donnees</h4>',
+        '<h4 style="text-align: left; color: #000000;">Aperçu de l\'ensemble des donnees</h4>',
         unsafe_allow_html=True,
     )
     report_data_overview = st.text_area(
@@ -413,7 +294,7 @@ def rapport_par_camera(selected_df):
         '<h4 style="text-align: left; color: #000000;">colonnes des donnees</h4>',
         unsafe_allow_html=True,
     )
-    report_col_desc = display_column_descriptions(selected_df)
+    report_col_desc = display_column_descriptions(symphonia_data)
     if report_col_desc is None:
         report_col_desc = "No column descriptions available."
 
@@ -437,7 +318,7 @@ def rapport_par_camera(selected_df):
     )
 
     # Descriptive Statistics
-    st.subheader("Summary Statistics")
+    st.subheader("Statistiques Récapitulatives")
     report_desc_info = st.dataframe(summary_desc_symphonia(selected_df))
     desc_transposed = summary_desc_symphonia(selected_df[["Nombre"]])
     explanations = explain_summary_desc(desc_transposed)
@@ -451,24 +332,59 @@ def rapport_par_camera(selected_df):
         '<h4 style="text-align: left; color: #000000;">Distribution des donnees</h4>',
         unsafe_allow_html=True,
     )
-    st.dataframe(distribution_real_estate(selected_df, "Type d'objet", "Nombre"))
-    st.write(plot_real_estate_histogram(selected_df, "Type d'objet", "Nombre"))
+    
+    counts = count_by_type_objet(selected_df)
+    
+    # Accessing the counts
+    bus_count = counts['bus']
+    moto_count = counts['moto']
+    personne_count = counts['personne']
+    vehicule_intermediaire_count = counts['véhicule intermédiaire']
+    vehicule_leger_count = counts['véhicule léger']
+    velo_count = counts['vélo']
+
+    t_o_col1, t_o_col2, t_o_col3 = st.columns(3)
+    with t_o_col1:
+        st.write(f"Bus: {bus_count}")
+    with t_o_col2:
+        st.write(f"Moto: {moto_count}")
+    with t_o_col3:
+        st.write(f"Personne: {personne_count}")
+    with t_o_col1:  
+        st.write(f"Véhicule Intermédiaire: {vehicule_intermediaire_count}")
+    with t_o_col2:
+        st.write(f"Véhicule Léger: {vehicule_leger_count}")
+    with t_o_col3:
+        st.write(f"Vélo: {velo_count}")
+
+    #st.dataframe(distribution_real_estate(selected_df, "Type d'objet", "Nombre"))
+
+    if selected_df is not None:
+        distribution_fig = px.histogram(
+            selected_df,
+            x="Type d'objet",
+            y="Nombre",
+            title="Distribution des données",
+        )
+        st.plotly_chart(distribution_fig)
 
     # Data Visualizations
     st.subheader("Visualisation des donnees")
-    st.write(visualization_pie_repartition(selected_df))
+    
+
+    
+    # comparaison des donnees 
     st.markdown(
         '<h4 style="text-align: left; color: #000000;">comparaison des donnees</h4>',
         unsafe_allow_html=True,
     )
-    st.dataframe(comparaison_type_objet_real_estate(selected_df))
-    st.write(plot_comparaison_type_objet_real_estate(selected_df))
+    comparaison_fig, image_stream_comparaison = plot_comparaison_type_objet_real_estate(selected_df)
+    st.plotly_chart(comparaison_fig)
 
     # Trends and patterns
     st.subheader("Tendance et modele")
-    st.write(
-        plot_weekly_daily_patterns_real_estate(selected_df, "Horodatage", "Nombre")
-    )
+    mwd_fig, image_stream_mwd = plot_weekly_daily_patterns_real_estate(selected_df, "Horodatage", "Nombre")
+    st.plotly_chart(mwd_fig)
 
     # Anomalies and Insight
     st.subheader("Detection d'anomalies")
@@ -476,54 +392,55 @@ def rapport_par_camera(selected_df):
 
     # Conclusion
     st.subheader("Conclusion")
-    st.text_input("Entrer ou Modifier le text")
+    st.write("Resune")
+    conclusion_text = st.text_area("Entrer ou Modifier le text", "")
     st.markdown(
         '<h5 style="text-align: left; color: #000000;">Recommendation</h5>',
         unsafe_allow_html=True,
     )
-    st.text_area("Entrer ou Modifier le text")
+    recommendation_text = st.text_area("Modifier le text", "")
 
     # Appendices
     st.subheader("Appendices")
     st.write("glossaire")
-    if st.button("Générer"):
+    if st.button("Générer rapport"):
         pdf_data = generate_report(
             title=report_title,
             subtitle="Surveillance Data Analysis Report",
-            objective=report_objectif,
-            scope=report_scope,
-            overview=report_data_overview,
-            columns=report_col_desc,
-            missing_values=report_missing_val,
-            transformations=report_data_transform,
-            summary_stats=report_desc_info,
-            data_distribution=distribution_real_estate(
-                selected_df, "Type d'objet", "Nombre"
-            ),
-            traffic_volume=visualization_pie_repartition(selected_df),
-            scenarios=comparaison_type_objet_real_estate(selected_df),
-            monthly_trend=plot_weekly_daily_patterns_real_estate(
-                selected_df, "Horodatage", "Nombre"
-            ),
-            weekly_daily_patterns=plot_weekly_daily_patterns_real_estate(
-                selected_df, "Horodatage", "Nombre"
-            ),
-            anomaly_detection="Aucune anomalies detectee",
-            key_insights="",
-            summary="",
-            recommendations="",
-            appendices="glossaire",
+            intro_title="INTRODUCTION",
+            title_objectif="Objectif",
+            intro_objectif=report_objectif,
+            title_scope="Scope",
+            text_scope=report_scope,
+            title_data_desc="Description des donnees",
+            sub_title_data_text="Aperçu de l'ensemble des donnees",
+            data_overview_text=report_data_overview,
+            sub_title_data_desc_col="Colones des donnees",
+            col_data_desc_col=report_col_desc,
+            data_cleaning_title="Nettoyage et Preparation des donnee",
+            missing_val_title="Valeurs Manquantes",
+            missing_val_content=report_missing_val,
+            transformation_data_title="Tansformation des donnees.",
+            transformation_data_content=report_data_transform,
+            desc_stat_title="Statistiques Récapitulatives",
+            desc_stat_content=report_desc_info,
+            data_viz = "Visualisation des donnees",
+            conclusion_title="Conclusion",
+            conclusion_subtitl_r="Resume",
+            resume_content=conclusion_text,
+            recomm_title="Recommendation",
+            recomm_content=recommendation_text,
         )
         if pdf_data:
             st.download_button(
                 label="Télécharger le fichier PDF",
                 data=pdf_data,
-                file_name="rapport.pdf",
+                #file_name="rdp.pdf",
                 mime="application/pdf",
             )
         else:
             st.error("Erreur lors de la génération du rapport PDF.")
-    st.success("Rapport généré avec succès!")
+        st.success("Rapport généré avec succès!")
 
 
 def main():
