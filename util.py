@@ -1,16 +1,27 @@
+from networkx import thresholded_random_geometric_graph
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt # type: ignore
+import matplotlib
+matplotlib.use('Agg')
+import seaborn as sns
 import os
+import logging
 import pandas as pd
 import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from streamlit_modal import Modal
 import plotly.io as pio
+import plotly.io as pio
+pio.kaleido.scope.default_format = "png"
+pio.kaleido.scope.default_engine = "kaleido"
 from io import BytesIO
 
 
@@ -44,15 +55,6 @@ def load_combined_data(combined_file_path):
 
 
 def handle_missing_val_real_estate(data):
-    """
-    Filter out rows where 'Nombre' is zero.
-
-    Args:
-    - data (pd.DataFrame): Input DataFrame to filter.
-
-    Returns:
-    - filtered_data (pd.DataFrame): Data with rows where 'Nombre' is zero removed.
-    """
     filtered_data = data[data["Nombre"] != 0]  # Filter rows where 'Nombre' is not zero
     return filtered_data
 
@@ -167,6 +169,7 @@ def plot_comparaison_type_objet_real_estate(symphonia_data):
             "Scénario": "Scénario",
             "Type d'objet": "Type d'objet",
         },
+        color_discrete_sequence=px.colors.qualitative.Plotly
     )
     image_stream_comparaison = BytesIO()
     pio.write_image(comparaison_fig, image_stream_comparaison, format="png", width=955, height=525, scale=2)
@@ -200,6 +203,7 @@ def repartition_viz(symphonia_data):
         values="événements",
         names="Caméra",
         color_discrete_sequence=px.colors.sequential.RdBu,
+        title = "Repartition en pourcentage des donnees par camera",
         width=600,  # Set the width of the plot
         height=600,
     )
@@ -273,7 +277,7 @@ def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_co
 
     mwd_fig.add_trace(
         go.Scatter(
-            x=monthly_pattern.index, y=monthly_pattern, mode="lines", name="Mois"
+            x=monthly_pattern.index, y=monthly_pattern, mode="lines", name="Mois", line=dict(color='blue')
         ),
         row=1,
         col=1,
@@ -281,14 +285,14 @@ def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_co
 
     mwd_fig.add_trace(
         go.Scatter(
-            x=weekly_pattern.index, y=weekly_pattern, mode="lines", name="Semaine"
+            x=weekly_pattern.index, y=weekly_pattern, mode="lines", name="Semaine", line=dict(color='green')
         ),
         row=2,
         col=1,
     )
 
     mwd_fig.add_trace(
-        go.Scatter(x=daily_pattern.index, y=daily_pattern, mode="lines", name="Jour"),
+        go.Scatter(x=daily_pattern.index, y=daily_pattern, mode="lines", name="Jour", line=dict(color='red')),
         row=3,
         col=1,
     )
@@ -305,9 +309,268 @@ def plot_weekly_daily_patterns_real_estate(symphonia_data, date_column, value_co
     return mwd_fig, image_stream_mwd
     
 # end of it
+def preprocess_data(data):
+    # Convert Horodatage to datetime
+    data['Horodatage'] = pd.to_datetime(data['Horodatage'], format='%d/%m/%Y %H:%M:%S')
+    # Extract month and year
+    data['Month'] = data['Horodatage'].dt.to_period('M')
+    return data
+def create_pivot_table(data):
+    # Group by month and type of object and sum the 'Nombre'
+    grouped_data = data.groupby(['Month', 'Type d\'objet'])['Nombre'].sum().reset_index()
+    
+    # Pivot the data to get the desired table format
+    pivot_table = grouped_data.pivot_table(
+        index='Month',
+        columns='Type d\'objet',
+        values='Nombre',
+        fill_value=0
+    ).reset_index()
+    
+    return pivot_table
+
+def analyse_comparative_par_camera(data):
+    # Calculer le nombre moyen d'objets détectés par caméra
+    camera_means = data.groupby("Caméra")["Nombre"].mean().reset_index()
+    
+    # Tracer le graphique
+    ana_compa_cam_fig = px.bar(camera_means, x="Caméra", y="Nombre", title="Nombre moyen d'objets détectés par caméra", color_discrete_sequence=px.colors.qualitative.Plotly)
+    ana_compa_cam_fig.update_layout(yaxis_title="Nombre moyen d'objets", xaxis_title="Caméra")
+    
+    
+    image_stream_compa_fig = BytesIO()
+    pio.write_image(ana_compa_cam_fig, image_stream_compa_fig, format="png", width=955, height=525, scale=2)
+    image_stream_compa_fig.seek(0)
+    return ana_compa_cam_fig, image_stream_compa_fig
+
+def ecart_type_intercameras(data):
+    # Calculer l'écart-type du nombre d'objets détectés par caméra
+    camera_std = data.groupby("Caméra")["Nombre"].std().reset_index()
+    
+    # Tracer le graphique
+    ecart_type_fig = px.bar(camera_std, x="Caméra", y="Nombre", title="Écart-type des objets détectés par caméra", color_discrete_sequence=px.colors.qualitative.Plotly)
+    ecart_type_fig.update_layout(yaxis_title="Écart-type", xaxis_title="Caméra")
+    
+    image_stream_ecart_type = BytesIO()
+    pio.write_image(ecart_type_fig, image_stream_ecart_type, format="png", width=955, height=525, scale=2)
+    image_stream_ecart_type.seek(0)
+    return ecart_type_fig,image_stream_ecart_type
+
+def diagrammes_de_dispersion(data):
+    # Tracer un diagramme de dispersion pour visualiser la répartition des détections d'objets par caméra
+    dia_disp_fig = px.scatter(data, x="Caméra", y="Nombre", color="Type d'objet", title="Répartition des détections d'objets par caméra", color_discrete_sequence=px.colors.qualitative.Plotly)
+    dia_disp_fig.update_layout(yaxis_title="Nombre d'objets détectés", xaxis_title="Caméra")
+    
+    image_stream_diagram_dispersion = BytesIO()
+    pio.write_image(dia_disp_fig, image_stream_diagram_dispersion, format="png", width=955, height=525, scale=2)
+    image_stream_diagram_dispersion.seek(0)
+    return dia_disp_fig, image_stream_diagram_dispersion
+
+def analyse_correlation(data):
+    # Calculer la corrélation entre les différents types d'objets détectés
+    pivot_table = data.pivot_table(index="Horodatage", columns="Type d'objet", values="Nombre", aggfunc="sum").fillna(0)
+    correlation_matrix = pivot_table.corr()
+    
+   # Tracer le graphique de corrélation
+    analyse_corr_fig = go.Figure(data=go.Heatmap(
+        z=correlation_matrix.values,
+        x=correlation_matrix.columns,
+        y=correlation_matrix.index,
+        colorscale='RdBu',
+        zmin=-1, zmax=1,
+        text=correlation_matrix.values.round(2),
+        texttemplate="%{text}",
+        textfont={"size":10},
+    ))
+    
+    analyse_corr_fig.update_layout(
+        title="Analyse de corrélation entre les types d'objets",
+        xaxis_title="Type d'objet",
+        yaxis_title="Type d'objet",
+        width=750,
+        height=525,
+    )
+    image_stream_analyse_corr_fig = BytesIO()
+    pio.write_image(analyse_corr_fig, image_stream_analyse_corr_fig, format="png", width=925, height=525, scale=2)
+    image_stream_analyse_corr_fig.seek(0)
+    return analyse_corr_fig, image_stream_analyse_corr_fig
+
+def correlation_analysis(data):
+    # Convertir la colonne Horodatage en datetime et extraire les informations temporelles
+    data["Horodatage"] = pd.to_datetime(data["Horodatage"], format="%d/%m/%Y %H:%M:%S")
+    data["Hour"] = data["Horodatage"].dt.hour
+    data["DayOfWeek"] = data["Horodatage"].dt.dayofweek
+    
+    # Créer une table pivot pour les types d'objets et les variables temporelles
+    pivot_table = data.pivot_table(index="Horodatage", columns="Type d'objet", values="Nombre", aggfunc="sum").fillna(0)
+    pivot_table["Hour"] = data["Hour"]
+    pivot_table["DayOfWeek"] = data["DayOfWeek"]
+    
+    # Calculer les coefficients de corrélation
+    correlation_matrix = pivot_table.corr()
+    
+    # Visualiser les corrélations avec une carte de chaleur
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", linewidths=.5)
+    plt.title("Analyse de corrélation entre les types d'objets et les variables temporelles")
+    plt.show()
+
+    # Pour une visualisation interactive avec Plotly
+    corr_analysis_fig = px.imshow(correlation_matrix, title="Analyse de corrélation entre les types d'objets et les variables temporelles", text_auto=True, aspect="auto")
+    corr_analysis_fig.update_layout(xaxis_title="Type d'objet/Variable Temporelle", yaxis_title="Type d'objet/Variable Temporelle")
+    
+    return corr_analysis_fig
+
+
+def detect_anomalies(data, value_column='Nombre', threshold=0.01):
+    # Isolation Forest for anomaly detection
+    iso_forest = IsolationForest(contamination=threshold, random_state=42)
+    data['anomaly'] = iso_forest.fit_predict(data[[value_column]])
+    data['anomaly'] = data['anomaly'].map({1: 'Normal', -1: 'Anomaly'})
+    
+    # Z-score method for anomaly detection
+    data['z_score'] = (data[value_column] - data[value_column].mean()) / data[value_column].std()
+    data['is_anomaly'] = data['z_score'].abs() > 3
+    
+    print(f"Columns after anomaly detection: {data.columns.tolist()}")  # Debug print
+    return data
+
+def plot_anomalies(data, date_column='Horodatage', value_column='Nombre'):
+    if 'anomaly' not in data.columns:
+        print("Warning: 'anomaly' column not found. Adding a default 'Normal' value.")
+        data['anomaly'] = 'Normal'
+    
+    color_palette = px.colors.qualitative.Plotly
+    
+    fig = px.scatter(data, x=date_column, y=value_column, color='anomaly', color_discrete_sequence=color_palette, 
+                     title='Anomalies dans les Données de Détection')
+    fig.update_layout(height=600, width=800)
+    return fig
+
+def analyze_anomalies(data, value_column='Nombre', threshold=0.01):
+    # Detect anomalies in the data
+    data_with_anomalies = detect_anomalies(data, value_column, threshold)
+    
+    # Plot anomalies
+    try:
+        anomaly_plot = plot_anomalies(data_with_anomalies)
+    except Exception as e:
+        print(f"Error plotting anomalies: {str(e)}")
+        anomaly_plot = None
+    
+    # Summarize anomalies
+    if 'is_anomaly' in data_with_anomalies.columns:
+        anomaly_summary = data_with_anomalies[data_with_anomalies['is_anomaly']].describe()
+    else:
+        print("Warning: 'is_anomaly' column not found. Cannot generate summary.")
+        anomaly_summary = None
+        
+    image_stream_anomaly_plot = BytesIO()
+    pio.write_image(anomaly_plot, image_stream_anomaly_plot, format='png', width=800, height=600, scale=2)
+    image_stream_anomaly_plot.seek(0)
+    
+    return anomaly_plot, anomaly_summary, image_stream_anomaly_plot
+
+
+def segmentation_grouping(data, n_clusters=5):
+    # Convertir la colonne Horodatage en datetime et extraire les informations temporelles
+    data["Horodatage"] = pd.to_datetime(data["Horodatage"], format="%d/%m/%Y %H:%M:%S")
+    data["Hour"] = data["Horodatage"].dt.hour
+    data["DayOfWeek"] = data["Horodatage"].dt.dayofweek
+    
+    # Préparer les données pour le clustering
+    clustering_data = data.groupby(["Hour", "DayOfWeek", "Type d'objet"])["Nombre"].sum().reset_index()
+    clustering_features = clustering_data[["Hour", "DayOfWeek", "Nombre"]]
+    
+    # Appliquer K-means clustering
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    clustering_data["Cluster"] = kmeans.fit_predict(clustering_features)
+    
+    # Visualiser les clusters
+    seg_group_fig = px.scatter_3d(clustering_data, x="Hour", y="DayOfWeek", z="Nombre", color="Cluster", 
+                        hover_data=["Type d'objet"], title="Segmentation et Groupement des Objets Détectés",color_continuous_scale=px.colors.sequential.Viridis)
+    seg_group_fig.update_layout(scene=dict(
+                        xaxis_title='Heure',
+                        yaxis_title='Jour de la semaine',
+                        zaxis_title='Nombre d\'objets'))
+    
+    image_stream_seg_group_fig = BytesIO()
+    pio.write_image(seg_group_fig, image_stream_seg_group_fig, format="png", width=955, height=525, scale=2)
+    image_stream_seg_group_fig.seek(0)
+    
+    return seg_group_fig, clustering_data, image_stream_seg_group_fig
+
+def summarize_key_observations(data):
+    summary = {
+        'Caméra a haute activité': data.groupby('Caméra')['Nombre'].sum().idxmax(),
+        'Caméra a faible activité': data.groupby('Caméra')['Nombre'].sum().idxmin(),
+        'Heure de pointe': data.groupby(data['Horodatage'].dt.hour)['Nombre'].sum().idxmax(),
+        'Heure creuse': data.groupby(data['Horodatage'].dt.hour)['Nombre'].sum().idxmin(),
+        'Objet le plus detecte': data.groupby('Type d\'objet')['Nombre'].sum().idxmax(),
+        'Objet le moins detecte': data.groupby('Type d\'objet')['Nombre'].sum().idxmin()
+    }
+    return summary
+
+def interpret_results(summary):
+    interpretation = {
+        'Caméra a haute activité': f"La caméra avec le plus d'activité est {summary['Caméra a haute activité']}, située probablement dans une zone à forte circulation.",
+        'Caméra a faible activité': f"La caméra avec le moins d'activité est {summary['Caméra a faible activité']}, située probablement dans une zone moins fréquentée.",
+        'Heure de pointe': f"Les heures de pointe sont à {summary['Heure de pointe']} heures, suggérant une augmentation des mouvements pendant cette période.",
+        'Heure creuse': f"Les heures creuses sont à {summary['Heure creuse']} heures, indiquant moins de mouvements.",
+        'Objet le plus detecte': f"L'objet le plus détecté est {summary['Objet le plus detecte']}, ce qui peut refléter des activités quotidiennes courantes.",
+        'Objet le moins detecte': f"L'objet le moins détecté est {summary['Objet le moins detecte']}, indiquant une rareté de cet objet dans la zone surveillée."
+    }
+    return interpretation
+
+def main_analysis(data):
+    summary = summarize_key_observations(data)
+    interpretation = interpret_results(summary)
+    return summary, interpretation
+
+# element d'analyse par camera pour un rapport
+
+# Fonction pour analyser la variabilité entre les scenarios
+def analyze_scenario_variability(data):
+    scenario_means = data.groupby('Scénario')['Nombre'].mean().reset_index()
+    scenario_std = data.groupby('Scénario')['Nombre'].std().reset_index()
+    
+    fig_mean = px.bar(scenario_means, x='Scénario', y='Nombre', title='Nombre moyen d\'objets détectés par scénario')
+    fig_std = px.bar(scenario_std, x='Scénario', y='Nombre', title='Écart-type de la détection d\'objets par scénario')
+    
+    return fig_mean, fig_std
+
+def summarize_key_observations_per_cam(data):
+    summary = {
+        'Scénario a haute activité': data.groupby('Scénario')['Nombre'].sum().idxmax(),
+        'Scénario a faible activité': data.groupby('Scénario')['Nombre'].sum().idxmin(),
+        'Heure de pointe': int(data.groupby(data['Horodatage'].dt.hour)['Nombre'].sum().idxmax()),
+        'Heure creuse': int(data.groupby(data['Horodatage'].dt.hour)['Nombre'].sum().idxmin()),
+        'Objet le plus detecte': data.groupby('Type d\'objet')['Nombre'].sum().idxmax(),
+        'Objet le moins detecte': data.groupby('Type d\'objet')['Nombre'].sum().idxmin()
+    }
+    return summary
+
+def interpret_results_per_cam(summary):
+    interpretation = {
+        'Scénario a haute activité': f"La Scénario avec le plus d'activité est {summary['Scénario a haute activité']}, située probablement dans une zone à forte circulation.",
+        'Scénario a faible activité': f"La Scénario avec le moins d'activité est {summary['Scénario a faible activité']}, située probablement dans une zone moins fréquentée.",
+        'Heure de pointe': f"Les heures de pointe sont à {summary['Heure de pointe']} heures, suggérant une augmentation des mouvements pendant cette période.",
+        'Heure creuse': f"Les heures creuses sont à {summary['Heure creuse']} heures, indiquant moins de mouvements.",
+        'Objet le plus detecte': f"L'objet le plus détecté est {summary['Objet le plus detecte']}, ce qui peut refléter des activités quotidiennes courantes.",
+        'Objet le moins detecte': f"L'objet le moins détecté est {summary['Objet le moins detecte']}, indiquant une rareté de cet objet dans la zone surveillée."
+    }
+    return interpretation
+
+def main_analysis_per_cam(data):
+    summary = summarize_key_observations_per_cam(data)
+    interpretation = interpret_results_per_cam(summary)
+    return summary, interpretation
+    
+# fin des function utils pour rapport par camera
+# -------------------------------------------------------------------
 def count_by_type_objet(selected_df):
     # Filter to ensure only relevant types of objects are considered
-    relevant_objects = ["bus", "moto", "personne", "véhicule intermédiaire", "véhicule léger", "vélo"]
+    relevant_objects = ["bus", "moto", "personne", "véhicule intermédiaire", "véhicule léger", "vélo", "poids lourd"]
     filtered_data = selected_df[selected_df["Type d'objet"].isin(relevant_objects)]
     
      # Sum the 'Nombre' for each type of object
@@ -454,9 +717,12 @@ def analysis(selected_df):
         plot_histogram(selected_df, "Type d'objet", "Nombre")
 
     st.subheader("Détection des anomalies")
-    threshold = st.number_input("Définir le seuil d'anomalie", value=10)
-    st.write(detect_anomalies(selected_df, "Nombre", threshold))
-
+    #threshold = st.number_input("Définir le seuil d'anomalie", value=10)
+    #st.write(detect_anomalies(selected_df, "Nombre", threshold))
+    anomaly_plot, anomaly_summary, image_stream_anomaly_plot = analyze_anomalies(selected_df, threshold=0.01)
+    st.plotly_chart(anomaly_plot)
+    st.write(anomaly_summary)
+    
     st.subheader("Tendances hebdomadaires et quotidiennes")
     monthly, weekly, daily = calculate_monthly_weekly_daily_patterns(
         selected_df, "Horodatage", "Nombre"
